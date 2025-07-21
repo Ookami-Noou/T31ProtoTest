@@ -1,47 +1,36 @@
-﻿// Copyright (c) 2023 Cesanta Software Limited
-// All rights reserved
-//
-// Example MQTT client. It performs the following steps:
-//    1. Connects to the MQTT server specified by `s_url` variable
-//    2. When connected, subscribes to the topic `s_sub_topic`
-//    3. Publishes message `hello` to the `s_pub_topic`
-//    4. Receives that message back from the subscribed topic and closes
-//    5. Timer-based reconnection logic revives the connection when it is down
-//
-// To enable SSL/TLS, see https://mongoose.ws/tutorials/tls/#how-to-build
+﻿#ifndef PROTO_MQTT_INTERACTIVE_H
+#define PROTO_MQTT_INTERACTIVE_H
 
 #include "mongoose.h"
 #include "json_util.h"
 #include <time.h>
 #include <stdio.h>
-
-#include "controller.h"
+#include "util.h"
 
 static const char* const report_property_message_type = "report_property";  // Message type for report_property
 
 // in case of some attributes are constant for each device, they're defined here
 // region const device attributes
 
-static const char* user = "bWFzdGVyLeiAs+acuua1i+ivlQ==";               // user account
-static const char* password = "595911d4-341d-436a-9611-2e8791e8bf44";   // user password
-static const char* dev_name = "WESEE_E01";                              // device name
-static const char* dev_os = "Linux Zeratul";                            // device OS
-static const char* sn = "24092510001308";                               // device sn
-static const char* hw_ver = "1.0";                                      // hardware version of device
-static const char* sw_ver = "E01_ZC_WEBRTC_20250102_1740";              // T31 / T32 version
-static const char* wifi_mac = "b8:2d:28:c7:77:d5";                      // wifi mac address
-static const char* bt_mac = "f1:d2:11:00:18:f7";                        // bluetooth mac address
-static const char* bt_ver = "V9.1.1.51";                                // bluetooth fireware version
-static const char* webrtc = "HCSX-00-NB23-7FHK-00000013";               // webrtc code. format: 1234-12-1234-1234-1234567
-static long total_disk = 16 * 1024 * 1024L;                             // total disk size. Unit: Byte
-static const char* client_id = "%s~%s";                                 // client id for communicating with server. ## init later in main function
+static const char* user = null;             // user account
+static const char* password = null;         // user password
+static const char* dev_name = null;         // device name
+static const char* dev_os = null;           // device OS
+static const char* sn = null;               // device sn
+static const char* hw_ver = null;           // hardware version of device
+static const char* sw_ver = null;           // T31 / T32 version
+static const char* wifi_mac = null;         // wifi mac address
+static const char* bt_mac = null;           // bluetooth mac address
+static const char* bt_ver = null;           // bluetooth fireware version
+static const char* webrtc = null;           // webrtc code. format: 1234-12-1234-1234-1234567
+static long total_disk = 0;                 // total disk size. Unit: Byte
+static const char* client_id = "%s~%s";     // client id for communicating with server. ## init later in main function
 
 static const char* s_url = "mqtt://36.137.92.217:1007";                 // server url for MQTT-connection
 static const char* s_sub_topic = "earphone_f1/%s~%s/cmd";               // subscribe topic, ## init later in main function
 static const char* s_pub_topic = "earphone_f1/%s~%s/status";            // publish topic,   ## init later in main function
 static int s_qos = 1;                                                   // MQTT QoS
 // endregion
-
 
 static struct mg_connection* s_conn;              // Client connection
 
@@ -142,7 +131,9 @@ struct mg_str get_result_replay_msg(const char* const message_type, const char* 
     return mg_str(msg);
 }
 
+// TODO use json lib to process data received from server;
 void process_received_data(const struct mg_str* const data) {
+    printf("%s:%d TODO use json lib to process data received from server", __FILE__, __LINE__);
     if (data == null || data->len == 0 || data->buf == null) return;
     if (!is_json_string(data->buf, data->len)) {
         MG_ERROR(("Received data is not a valid JSON string: %.*s", (int)data->len, data->buf));
@@ -158,7 +149,7 @@ void process_received_data(const struct mg_str* const data) {
         MG_ERROR(("Received command for a different client_id: expected %s, got %s", client_id, cmd->client_id));
         return;
     }
-    const char* replay_type = null;
+    const char* replay_type = (const char*)null;
     if (!strcmp(cmd->type, "command_debug_reply")) {
         replay_type = "result_debug_reply";
     }
@@ -186,7 +177,7 @@ void process_received_data(const struct mg_str* const data) {
 }
 
 /* callback for mqtt commection */
-static void fn(struct mg_connection* c, int ev, void* ev_data) {
+static void mqtt_interactive_callback_fn(struct mg_connection* c, int ev, void* ev_data) {
     char time[10] = { 0 };
     format_current_time(time);
     if (ev == MG_EV_OPEN) {
@@ -233,22 +224,22 @@ static void fn(struct mg_connection* c, int ev, void* ev_data) {
     }
     else if (ev == MG_EV_CLOSE) {
         MG_INFO(("%s \t%lu CLOSED\n", time, c->id));
-        s_conn = null;  // Mark that we're closed
+        s_conn = (struct mg_connection*)null;  // Mark that we're closed
     }
 }
 
 // Timer function - recreate client connection if it is closed
 static void timer_reconn_fn(void* arg) {
     struct mg_mgr* mgr = (struct mg_mgr*)arg;
-    struct mg_mqtt_opts opts = {
-        .clean = true,
-        .user = mg_str(user),
-        .pass = mg_str(password),
-        .qos = s_qos,
-        .topic = mg_str(s_pub_topic),
-        .client_id = mg_str(client_id),
-    };
-    if (s_conn == null) s_conn = mg_mqtt_connect(mgr, s_url, &opts, fn, null);
+    struct mg_mqtt_opts opts;
+	memset(&opts, 0, sizeof(opts));
+    opts.clean = true;
+    opts.user = mg_str(user);
+    opts.pass = mg_str(password);
+    opts.qos = s_qos;
+	opts.topic = mg_str(s_pub_topic);
+	opts.client_id = mg_str(client_id);
+    if (s_conn == null) s_conn = mg_mqtt_connect(mgr, s_url, &opts, mqtt_interactive_callback_fn, null);
 }
 
 /* upload device info timer */
@@ -260,8 +251,87 @@ static void timer_upload_fun(void* arg) {
     send_pub_message(&msg);
 }
 
-int mqtt_main(int argc, char* argv[]) {
-	// TODO set params in region: const device attributes
+static void print_mqtt_main_usage() {
+	printf("Usage: mqtt_main [options]\n");
+	printf("Options:\n");
+	printf("  -user <user>          Required. Set the user account (base64 encoded).\n");
+	printf("  -password <password>  Required. Set the user password.\n");
+	printf("  -dev_name <name>      Required. Set the device name.\n");
+	printf("  -dev_os <os>          Required. Set the device OS (e.g., Linux Zeratul).\n");
+	printf("  -sn <serial_number>   Required. Set the device serial number.\n");
+	printf("  -hw_ver <version>     Required. Set the hardware version.\n");
+	printf("  -sw_ver <version>     Required. Set the software version.\n");
+	printf("  -wifi_mac <mac>       Required. Set the WiFi MAC address.\n");
+	printf("  -bt_mac <mac>         Required. Set the Bluetooth MAC address.\n");
+	printf("  -bt_ver <version>     Required. Set the Bluetooth version.\n");
+	printf("  -total_disk <size>    Required. Set the total disk size in bytes.\n");
+	printf("  -webrtc <code>        Required. Set the WebRTC code.\n");
+	printf("  -qos <0|1|2>          Set the MQTT QoS level (default is 1).\n");
+	printf("  -h, -help, -?         Show this help message.\n");
+}
+
+int mqtt_interactive_main(int argc, char* argv[]) {
+    for (int i = 1; i < argc - 1; i++) {
+        if (!strcmp("-user", argv[i])) {
+            user = argv[++i];  // Set user account
+        }
+        else if (!strcmp("-password", argv[i])) {
+            password = argv[++i];  // Set user password
+        }
+        else if (!strcmp("-dev_name", argv[i])) {
+            dev_name = argv[++i];  // Set device name
+        }
+        else if (!strcmp("-dev_os", argv[i])) {
+			dev_os = argv[++i];  // Set device OS
+        }
+        else if (!strcmp("-sn", argv[i])) {
+            sn = argv[++i];  // Set device serial number
+        }
+        else if (!strcmp("-hw_ver", argv[i])) {
+            hw_ver = argv[++i];  // Set hardware version
+        }
+        else if (!strcmp("-sw_ver", argv[i])) {
+            sw_ver = argv[++i];  // Set software version
+        }
+        else if (!strcmp("-wifi_mac", argv[i])) {
+            wifi_mac = argv[++i];  // Set WiFi MAC address
+        }
+        else if (!strcmp("-bt_mac", argv[i])) {
+            bt_mac = argv[++i];  // Set Bluetooth MAC address
+        }
+        else if (!strcmp("-bt_ver", argv[i])) {
+            bt_ver = argv[++i];  // Set Bluetooth version
+        }
+        else if (!strcmp("-total_disk", argv[i])) {
+            bool success = false;
+            total_disk = string_to_long(argv[++i], strlen(argv[i]), &success);
+            if (!success || total_disk <= 0) {
+                printf("Invalid total disk size: must be an integer and bigger than 0, but received: %s\n", argv[i]);
+                return 1;
+            }
+        }
+        else if (!strcmp("-webrtc", argv[i])) {
+            webrtc = argv[++i];  // Set WebRTC code
+        }
+        else if (!strcmp("-qos", argv[i])) {
+            bool success = false;
+            s_qos = (int) string_to_long(argv[++i], strlen(argv[i]), &success);
+            if (!success || s_qos < 0 || s_qos > 2) {
+                printf("Invalid QoS value: must be an integer between 0 and 2, but received: %s\n", argv[i]);
+                return 1;
+            }
+        }
+        else if (!strcmp("-h", argv[i]) || !strcmp("-help", argv[i]) || !strcmp("-?", argv[i])) {
+            print_mqtt_main_usage();
+            return 0;
+        }
+    }
+
+    if (!user || !password || !dev_name || !sn || !hw_ver || !sw_ver || !wifi_mac || !bt_mac || !bt_ver || !webrtc) {
+        printf("Missing required parameters. Please provide user, password, dev_name, sn, hw_ver, sw_ver, wifi_mac, bt_mac, bt_ver, and webrtc.\n");
+        print_mqtt_main_usage();
+        return 1;
+    }
 
     s_sub_topic = mg_mprintf(s_sub_topic, dev_name, sn);  // Initialize subscription topic
     s_pub_topic = mg_mprintf(s_pub_topic, dev_name, sn);  // Initialize publication topic
@@ -277,8 +347,5 @@ int mqtt_main(int argc, char* argv[]) {
     return 0;
 }
 
-#if MQTT_MAIN == ENTRY
-int main(int argc, char* argv[]) {
-    return mqtt_main(argc, argv);
-}
-#endif
+
+#endif // !PROTO_MQTT_INTERACTIVE_H

@@ -1,32 +1,31 @@
+#ifndef PROTO_HTTP_DOWNLOAD_H
+#define PROTO_HTTP_DOWNLOAD_H
 #include "mongoose.h"
-#include "controller.h"
 #include <stdio.h>
 #include <string.h>
+#include "util.h"
 
-// how many bytes to download per piece.
-#define DOWNLOAD_SIZE_PER_PIECE (1 * 1024 * 1024LL)
+static int64_t max_size_per_piece = 1 * 1024 * 1024; // how many bytes to download per piece. set by  -s
 
+static uint64_t s_timeout_ms = 10000; // timeout in milliseconds for connection, default is 10 seconds  set by  -t
+static const char* url = null;  // the url download from. set by  -u
 
-static char* buffer = null; // buffer used for saving stream downloaded
-static const uint64_t s_timeout_ms = 10000;
-static const char* url = "http://ylxiot-bucket.eos-guiyang-4.cmecloud.cn/"    // scheme://host:port
-"ota/e2c87511-6972-403f-b497-50b83337481a-%E6%B5%8B%E8%AF%95ota%E5%8C%85.zip"   // uri
-"?AWSAccessKeyId=qFvAMy4cfaChR0IoRSa0bw5HXEps&Expires=33300345599&Signature=7JpxllsPtbDOwRYtz0YyJzN0%2Bwk%3D"; // params
+static const char* download_path = null; // path to save downloaded file. including filename. set by  -p
 
-static const char* download_path = "download.zip"; // path to save downloaded file. including filename
-static FILE* file = null; // File pointer to write to
+static FILE* file = (FILE*) null; // File pointer to write to
 
+static char* buffer = (char*)null; // buffer used for saving stream downloaded
 int64_t buffer_len = 0;      // how many bytes is effectively downloaded into buffer
 int64_t download_offset = 0; // the offset to download from, in bytes
 int64_t all_size = 0;        // how many bytes of the whole file in server
 
-static void fn(struct mg_connection* c, int ev, void* ev_data);
-
-static long string_to_long(const char* str, int len, bool* success);
+static void http_download_callback_fn(struct mg_connection* c, int ev, void* ev_data);
 
 static void parse_content_range_value(const char* str, int len, int64_t* start_pos, int64_t* end_pos, int64_t* all_size, bool* success);
 
 static void write_to_file();
+
+static void print_http_download_usage();
 
 #define RUNNING 0
 #define SUCCESS 1
@@ -34,7 +33,53 @@ static void write_to_file();
 
 /** the Entry pf HTTP download file module */
 int http_download_main(int argc, char* argv[]) {
-    buffer = (char*)malloc(DOWNLOAD_SIZE_PER_PIECE);
+
+    for (int i = 1; i < argc - 1; i++) {
+        if (!strcmp("-h", argv[i]) || !strcmp("-help", argv[i]) || !strcmp("-?", argv[i])) {
+            print_http_download_usage();
+            return 0;
+        }
+        if (!strcmp("-u", argv[i])) {
+            url = argv[++i];
+        }
+        else if (!strcmp("-p", argv[i])) {
+            download_path = argv[++i];
+        }
+        else if (!strcmp("-t", argv[i])) {
+            bool success = false;
+            s_timeout_ms = string_to_long(argv[++i], strlen(argv[i]), &success);
+            if (!success || s_timeout_ms <= 0) {
+                printf("Invalid timeout value: must be an integer and bigger than 0, but recieved: %s\n", argv[i]);
+                print_http_download_usage();
+                return 1;
+            }
+        }
+        else if (!strcmp("-s", argv[i])) {
+            bool success = false;
+            max_size_per_piece = string_to_long(argv[++i], strlen(argv[i]), &success);
+            if (!success || max_size_per_piece <= 0) {
+                printf("Invalid size value: must be an integer and bigger than 0, but received: %s\n", argv[i]);
+                print_http_download_usage();
+                return 1;
+            }
+        }
+        else {
+            printf("Unknown option: %s\n", argv[i]);
+            print_http_download_usage();
+            return 1;
+        }
+    }
+    if (url == null || download_path == null) {
+		printf("URL or download path is not set.\n");
+		print_http_download_usage();
+		return 1;
+    }
+
+
+
+
+
+    buffer = (char*)malloc(max_size_per_piece);
     if (buffer == null) {
         printf("buffer malloc failed");
         return 1;
@@ -53,7 +98,7 @@ int http_download_main(int argc, char* argv[]) {
     mg_mgr_init(&mgr);
 
     do {
-        mg_http_connect(&mgr, url, fn, &state);
+        mg_http_connect(&mgr, url, http_download_callback_fn, &state);
         while (state == RUNNING) {
             mg_mgr_poll(&mgr, 1000);
         }
@@ -68,19 +113,10 @@ int http_download_main(int argc, char* argv[]) {
 
     fclose(file);
     free(buffer);
-    printf("File written successfully.\n");
-
+    printf("File written successfully, wroten: %lld.\n", download_offset);
+    file = (FILE*)null;
     return 0;
 }
-
-#if ENTRY == HTTP_DOWNLOAD_MAIN
-int main(int argc, char* argv[]) {
-    return http_download_main(argc, argv);
-}
-#endif
-
-
-
 
 
 
@@ -90,7 +126,7 @@ int main(int argc, char* argv[]) {
 // in this function::
 // if u want to disconnect, u can set `c->is_closing` to 1(true)
 // when error occurred or request is ended, u should set `*(bool*)c->fn_data` to 1(true) for breaking `mg_mgr_poll` cycle in main function
-static void fn(struct mg_connection* c, int ev, void* ev_data) {
+static void http_download_callback_fn(struct mg_connection* c, int ev, void* ev_data) {
     if (ev == MG_EV_OPEN) {
         // Connection created. Store connect expiration time in c->data
         printf("Connection opened\n");
@@ -111,15 +147,15 @@ static void fn(struct mg_connection* c, int ev, void* ev_data) {
             "Connection: close\r\n"
             "Range: bytes=%lld-%lld\r\n"
             "\r\n",
-            mg_url_uri(url), host.len, host.buf, download_offset, download_offset + (int64_t)DOWNLOAD_SIZE_PER_PIECE - 1);
+            mg_url_uri(url), host.len, host.buf, download_offset, download_offset + (int64_t)max_size_per_piece - 1);
 
         printf("Sending HTTP request: %s\n", c->send.buf);
     }
     else if (ev == MG_EV_HTTP_MSG) {
         printf("Connection received message\n");
         struct mg_http_message* hm = (struct mg_http_message*)ev_data;
-        if (hm->body.len > DOWNLOAD_SIZE_PER_PIECE) {
-            printf("Body too large! (%lld > %lld)\n", hm->body.len, DOWNLOAD_SIZE_PER_PIECE);
+        if (hm->body.len > max_size_per_piece) {
+            printf("Body too large! (%lld > %lld)\n", hm->body.len, max_size_per_piece);
             *(int*)c->fn_data = ERROR;
             c->is_closing = 1;
             return;
@@ -174,39 +210,6 @@ static void fn(struct mg_connection* c, int ev, void* ev_data) {
     }
 }
 
-// Convert a string to a long integer, handling signs and invalid characters
-// if ivalid characters are found, it prints an error message and returns 0
-static long string_to_long(const char* str, int len, bool* success) {
-    long value = 0;
-    long sign = 1; // Default sign is positive
-    int i = 0;
-    if (str == NULL || len <= 0) {
-        *success = false;
-        printf("Invalid string or length: str=%p, len=%d\n", str, len);
-        return 0;
-    }
-    if (*str == '-') {
-        sign = -1;
-        i++;
-    }
-    else if (*str == '+') {
-        sign = 1;
-        i++;
-    }
-    for (; i < len; i++) {
-        if (str[i] == ' ' || str[i] == ',' || str[i] == '_') continue;
-        if (str[i] < '0' || str[i] > '9') {
-            *success = false;
-            printf("Invalid character '%c' in string '%.*s'\n", str[i], len, str);
-            return value * sign; // shut down
-        }
-        value = (value * 10) + (str[i] - '0');
-    }
-    *success = true;
-    return value * sign;
-}
-
-
 static void parse_content_range_value(const char* str, int len, int64_t* start_pos, int64_t* end_pos, int64_t* all_size, bool* success) {
     if (str == null || len < 11 || start_pos == null || end_pos == null || all_size == null) {
         if (success != null) {
@@ -246,3 +249,17 @@ static void write_to_file() {
         buffer_len = 0;
     }
 }
+
+static void print_http_download_usage() {
+    printf("Options:\n");
+    printf("  -u <url>       Required. Set the URL to download from. includes scheme, host, port, path, params and etc.\n");
+    printf("  -p <path>      Required. Set the path to save the downloaded file, includes filename, absolute path and suffix.\n");
+    printf("  -t <timeout>   Set the timeout in milliseconds. it must be integer and larger than 0 (default: 10 seconds)\n");
+    printf("  -s <size>      Set the maximum size of each download piece in bytes. it must be integer and larger than 0 (default: 1MB)\n");
+    printf("  -?\n");
+    printf("  -h\n");
+    printf("  -help          Show this help message\n");
+}
+
+
+#endif // !PROTO_HTTP_DOWNLOAD_H

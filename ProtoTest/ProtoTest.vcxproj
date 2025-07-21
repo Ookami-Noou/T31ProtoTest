@@ -19,14 +19,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="controller.h" />
+    <ClInclude Include="http_download.h" />
     <ClInclude Include="json_util.h" />
     <ClInclude Include="mongoose.h" />
+    <ClInclude Include="mqtt_iteractive.h" />
+    <ClInclude Include="util.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="http_download_main.c" />
+    <ClCompile Include="main.c" />
     <ClCompile Include="mongoose.c" />
-    <ClCompile Include="mqtt_main.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
