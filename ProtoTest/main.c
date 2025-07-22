@@ -30,7 +30,7 @@ int test_http_download() {
 	char* argv[] = {
 		"http_download",
 		"-u", "http://ylxiot-bucket.eos-guiyang-4.cmecloud.cn/ota/e2c87511-6972-403f-b497-50b83337481a-%E6%B5%8B%E8%AF%95ota%E5%8C%85.zip?AWSAccessKeyId=qFvAMy4cfaChR0IoRSa0bw5HXEps&Expires=33300345599&Signature=7JpxllsPtbDOwRYtz0YyJzN0%2Bwk%3D",
-		"-p", "download.zip",
+		"-p", "download1.zip",
 		"-t", "10000", // 10 seconds
 		"-s", "1048576", // 1 MB
 	};
@@ -38,5 +38,5 @@ int test_http_download() {
 }
 
 int main(int argc, char* argv[]) {
-	return test_mqtt_interactive();
+	return test_http_download();
 }

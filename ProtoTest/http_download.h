@@ -1,39 +1,45 @@
 #ifndef PROTO_HTTP_DOWNLOAD_H
 #define PROTO_HTTP_DOWNLOAD_H
+
 #include "mongoose.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "util.h"
 
-static int64_t max_size_per_piece = 1 * 1024 * 1024; // how many bytes to download per piece. set by  -s
+// Configuration defaults
+static int64_t max_size_per_piece = 1 * 1024 * 1024; // 1MB per chunk
+static uint64_t s_timeout_ms = 10000;                // 10s connection timeout
+static uint64_t s_transfer_timeout_ms = 30000;       // 30s transfer timeout
+static const char* url = NULL;
+static const char* download_path = NULL;
 
-static uint64_t s_timeout_ms = 10000; // timeout in milliseconds for connection, default is 10 seconds  set by  -t
-static const char* url = null;  // the url download from. set by  -u
+// Download state
+static FILE* download_file_p = NULL;
+static char* download_buffer = NULL;
+static int64_t download_buffer_len = 0;
+static int64_t download_offset = 0;
+static int64_t download_all_size = 0;
+static int retry_count = 0;
+static const int max_retries = 3;
 
-static const char* download_path = null; // path to save downloaded file. including filename. set by  -p
+// Status codes
+#define STETE_RUNNING 0
+#define STATE_SUCCESS 1
+#define STATE_ERROR   2
 
-static FILE* file = (FILE*) null; // File pointer to write to
-
-static char* buffer = (char*)null; // buffer used for saving stream downloaded
-int64_t buffer_len = 0;      // how many bytes is effectively downloaded into buffer
-int64_t download_offset = 0; // the offset to download from, in bytes
-int64_t all_size = 0;        // how many bytes of the whole file in server
-
+// Forward declarations
 static void http_download_callback_fn(struct mg_connection* c, int ev, void* ev_data);
-
 static void parse_content_range_value(const char* str, int len, int64_t* start_pos, int64_t* end_pos, int64_t* all_size, bool* success);
-
 static void write_to_file();
-
 static void print_http_download_usage();
+static void cleanup_resources();
 
-#define RUNNING 0
-#define SUCCESS 1
-#define ERROR   2
-
-/** the Entry pf HTTP download file module */
+/** Main entry point */
 int http_download_main(int argc, char* argv[]) {
+    int ret = 0;
 
+    // Parse command line arguments
     for (int i = 1; i < argc - 1; i++) {
         if (!strcmp("-h", argv[i]) || !strcmp("-help", argv[i]) || !strcmp("-?", argv[i])) {
             print_http_download_usage();
@@ -49,7 +55,7 @@ int http_download_main(int argc, char* argv[]) {
             bool success = false;
             s_timeout_ms = string_to_long(argv[++i], strlen(argv[i]), &success);
             if (!success || s_timeout_ms <= 0) {
-                printf("Invalid timeout value: must be an integer and bigger than 0, but recieved: %s\n", argv[i]);
+                printf("Invalid timeout value: must be positive integer\n");
                 print_http_download_usage();
                 return 1;
             }
@@ -58,7 +64,7 @@ int http_download_main(int argc, char* argv[]) {
             bool success = false;
             max_size_per_piece = string_to_long(argv[++i], strlen(argv[i]), &success);
             if (!success || max_size_per_piece <= 0) {
-                printf("Invalid size value: must be an integer and bigger than 0, but received: %s\n", argv[i]);
+                printf("Invalid size value: must be positive integer\n");
                 print_http_download_usage();
                 return 1;
             }
@@ -69,197 +75,253 @@ int http_download_main(int argc, char* argv[]) {
             return 1;
         }
     }
-    if (url == null || download_path == null) {
-		printf("URL or download path is not set.\n");
-		print_http_download_usage();
-		return 1;
-    }
 
-
-
-
-
-    buffer = (char*)malloc(max_size_per_piece);
-    if (buffer == null) {
-        printf("buffer malloc failed");
+    // Validate required parameters
+    if (url == NULL || download_path == NULL) {
+        printf("URL and download path are required\n");
+        print_http_download_usage();
         return 1;
     }
 
-    printf("ready to write into file: download.zip");
-    file = fopen("download.zip", "ab");
-    if (!file) {
-        printf("Failed to open file for writing.\n");
+    // Allocate download buffer
+    download_buffer = (char*)malloc(max_size_per_piece);
+    if (download_buffer == NULL) {
+        printf("Failed to allocate download buffer\n");
         return 1;
     }
 
+    // Open output file (truncate if exists)
+    download_file_p = fopen(download_path, "wb+");
+    if (!download_file_p) {
+        printf("Failed to open file: %s\n", download_path);
+        ret = 1;
+        goto cleanup;
+    }
 
-    int state = RUNNING;
+    // Main download loop
+    int state = STETE_RUNNING;
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
 
     do {
+        printf("Downloading range: %lld-%lld\n",
+            download_offset, download_offset + max_size_per_piece - 1);
+
         mg_http_connect(&mgr, url, http_download_callback_fn, &state);
-        while (state == RUNNING) {
+
+        // Event polling loop
+        while (state == STETE_RUNNING) {
             mg_mgr_poll(&mgr, 1000);
+            printf("Progress: %.1f%%\r",
+                download_all_size > 0 ? (double)download_offset / download_all_size * 100 : 0.0);
+            fflush(stdout);
         }
+
         write_to_file();
 
-        if (state == SUCCESS && download_offset < all_size) {
-            state = RUNNING;
+        // Handle retry logic
+        if (state == STATE_ERROR && retry_count++ < max_retries) {
+            printf("\nRetrying (%d/%d)...\n", retry_count, max_retries);
+            state = STETE_RUNNING;
+            continue;
         }
-    } while (state == RUNNING && download_offset < all_size);
+
+        // Continue if more data available
+        if (state == STATE_SUCCESS && download_all_size > 0 && download_offset < download_all_size) {
+            state = STETE_RUNNING;
+        }
+
+    } while (state == STETE_RUNNING && download_offset < download_all_size);
+
+    // Final status
+    if (state == STATE_SUCCESS) {
+        printf("\nDownload completed. Total size: %lld bytes\n", download_offset);
+    }
+    else {
+        printf("\nDownload failed\n");
+        ret = 1;
+    }
 
     mg_mgr_free(&mgr);
 
-    fclose(file);
-    free(buffer);
-    printf("File written successfully, wroten: %lld.\n", download_offset);
-    file = (FILE*)null;
-    return 0;
+cleanup:
+    cleanup_resources();
+    return ret;
 }
 
-
-
-
-
-
-// in this function::
-// if u want to disconnect, u can set `c->is_closing` to 1(true)
-// when error occurred or request is ended, u should set `*(bool*)c->fn_data` to 1(true) for breaking `mg_mgr_poll` cycle in main function
+/** Callback function for mongoose events */
 static void http_download_callback_fn(struct mg_connection* c, int ev, void* ev_data) {
-    if (ev == MG_EV_OPEN) {
-        // Connection created. Store connect expiration time in c->data
-        printf("Connection opened\n");
-        *(uint64_t*)c->data = mg_millis() + s_timeout_ms;
-    } if (ev == MG_EV_CONNECT) {
-        printf("Connection connected\n");
-        // TODO("config TLS options if needed, like this");
-        //struct mg_tls_opts opts = { .name = mg_url_host(url) };
-        //mg_tls_init(c, &opts);
+    int* pstate = (int*)c->fn_data;
 
-        // Attention:
-        // Here you mast write Host in format: `"%.*s", host.len, host.buf`.
-        // Otherwise the host.buf contains all data without scheme, including uri because they uses the same pointer.
-        // Or you can parse url by yourself also.
+    switch (ev) {
+    case MG_EV_OPEN:
+        *(uint64_t*)c->data = mg_millis() + s_timeout_ms + s_transfer_timeout_ms;
+        break;
+
+    case MG_EV_CONNECT: {
         struct mg_str host = mg_url_host(url);
-        mg_printf(c, "GET %s HTTP/1.1\r\n"
+        mg_printf(c,
+            "GET %s HTTP/1.1\r\n"
             "Host: %.*s\r\n"
             "Connection: close\r\n"
             "Range: bytes=%lld-%lld\r\n"
             "\r\n",
-            mg_url_uri(url), host.len, host.buf, download_offset, download_offset + (int64_t)max_size_per_piece - 1);
-
-        printf("Sending HTTP request: %s\n", c->send.buf);
+            mg_url_uri(url),
+            host.len, host.buf,
+            download_offset,
+            download_offset + max_size_per_piece - 1);
+        break;
     }
-    else if (ev == MG_EV_HTTP_MSG) {
-        printf("Connection received message\n");
+
+    case MG_EV_HTTP_MSG: {
         struct mg_http_message* hm = (struct mg_http_message*)ev_data;
-        if (hm->body.len > max_size_per_piece) {
-            printf("Body too large! (%lld > %lld)\n", hm->body.len, max_size_per_piece);
-            *(int*)c->fn_data = ERROR;
-            c->is_closing = 1;
-            return;
-        }
-        memcpy(buffer, hm->body.buf, hm->body.len);
-        buffer_len = hm->body.len;
-
-        printf("\n");
-        // here you can check some headers you need in hm->headers of response, such as:
-        // Content-Length
-        // Accept-Ranges
-        // Range
-        // and etc.
-
-        int header_count = sizeof(hm->headers) / sizeof(hm->headers[0]);
-        for (int i = 0; i < header_count; i++) {
-            struct mg_http_header* header = &hm->headers[i];
-            if (header->name.len == 0) continue;
-            printf("Header %d ----> %.*s: %.*s\n", i, (int)header->name.len, header->name.buf, (int)header->value.len, header->value.buf);
-            if (!strncmp("Content-Range", header->name.buf, header->name.len)) {
-                bool success = false;
-                int64_t data_start = -1, data_end = -1, total_size = -1;
-                parse_content_range_value(header->value.buf, header->value.len, &data_start, &data_end, &total_size, &success);
-                if (!success || data_start < 0 || data_end < 0 || total_size < 0) {
-                    printf("Failed to parse Content-Range header: %.*s\n", (int)header->value.len, header->value.buf);
+        int state_start = -1, state_end = -1;
+        for (size_t i = 0; i < hm->head.len; i++) {
+            if (hm->head.buf[i] == ' ') {
+                if (state_start < 0) {
+                    state_start = i + 1;
                 }
-                else {
-                    download_offset = data_end + 1;
-                    all_size = total_size;
-                    printf("Parsed Content-Range: start=%lld, end=%lld, total=%lld\n", data_start, data_end, total_size);
+                else if (state_end < 0) {
+                    state_end = i;
+                    break;
                 }
             }
         }
-        printf("\n");
+        bool get_state_success = false;
+        int resp_code = (int)string_to_long(hm->head.buf + state_start, state_end - state_start, &get_state_success);
+
+        // Check HTTP status code
+        if (resp_code != 200 && resp_code != 206) {
+            printf("\nHTTP error: %d\n", resp_code);
+            *pstate = STATE_ERROR;
+            c->is_closing = 1;
+            return;
+        }
+
+        // Handle full file response (no range support)
+        if (resp_code == 200) {
+            const struct mg_str* cl = mg_http_get_header(hm, "Content-Length");
+            if (cl) {
+                bool ok = false;
+                download_all_size = string_to_long(cl->buf, cl->len, &ok);
+                if (ok) download_offset = download_all_size;
+            }
+        }
+
+        // Validate body size
+        if (hm->body.len > max_size_per_piece) {
+            printf("\nBody too large (%lld > %lld)\n", hm->body.len, max_size_per_piece);
+            *pstate = STATE_ERROR;
+            c->is_closing = 1;
+            return;
+        }
+
+        // Store received data
+        memcpy(download_buffer, hm->body.buf, hm->body.len);
+        download_buffer_len = hm->body.len;
+
+        // Parse Content-Range header
+        struct mg_str* range_hdr = mg_http_get_header(hm, "Content-Range");
+        if (range_hdr != NULL) {
+            bool success = false;
+            int64_t start = -1, end = -1, total = -1;
+            parse_content_range_value(range_hdr->buf, range_hdr->len, &start, &end, &total, &success);
+
+            if (success) {
+                download_offset = end + 1;
+                download_all_size = total;
+                printf("\nReceived bytes %lld-%lld/%lld\n", start, end, total);
+            }
+        }
 
         c->is_closing = 1;
+        break;
     }
-    else if (ev == MG_EV_ERROR) {
-        *(bool*)c->fn_data = ERROR;
-        printf("MG_EV_ERROR: %s\n", (char*)ev_data);
-    }
-    else if (ev == MG_EV_CLOSE) {
-        printf("Connection closed\n");
-        *(bool*)c->fn_data = SUCCESS;
-    }
-    else if (ev == MG_EV_POLL) {
-        if (mg_millis() > *(uint64_t*)c->data &&
-            (c->is_connecting || c->is_resolving)) {
-            *(bool*)c->fn_data = ERROR;
-            printf("Connect timeout\n");
+
+    case MG_EV_ERROR:
+        printf("\nError: %s\n", (char*)ev_data);
+        *pstate = STATE_ERROR;
+        break;
+
+    case MG_EV_CLOSE:
+        if (*pstate == STETE_RUNNING) *pstate = STATE_SUCCESS;
+        break;
+
+    case MG_EV_POLL:
+        if (mg_millis() > *(uint64_t*)c->data) {
+            *pstate = STATE_ERROR;
+            mg_error(c, "Operation timed out");
         }
+        break;
     }
 }
 
-static void parse_content_range_value(const char* str, int len, int64_t* start_pos, int64_t* end_pos, int64_t* all_size, bool* success) {
-    if (str == null || len < 11 || start_pos == null || end_pos == null || all_size == null) {
-        if (success != null) {
-            *success = false;
-            return;
-        }
-        else {
-            printf("Invalid parameters for parse_content_range_value\n");
-            exit(1);
-            return;
-        }
+/** Parse Content-Range header */
+static void parse_content_range_value(const char* str, int len,
+    int64_t* start_pos, int64_t* end_pos,
+    int64_t* all_size, bool* success) {
+    *success = false;
+    if (!str || len < 11 || !start_pos || !end_pos || !all_size) return;
+
+    // Create null-terminated copy for safety
+    char* tmp = (char*)malloc(len + 1);
+    if (!tmp) return;
+
+    memcpy(tmp, str, len);
+    tmp[len] = '\0';
+
+    // Parse different Content-Range formats
+    if (sscanf(tmp, "bytes %lld-%lld/%lld", start_pos, end_pos, all_size) == 3) {
+        *success = true;
     }
-    *start_pos = -1;
-    *end_pos = -1;
-    *all_size = -1;
-    const char* p = str;
-    if (*str == ' ') {
-        p = str + 1;
+    else if (sscanf(tmp, "bytes %lld-%lld/*", start_pos, end_pos) == 2) {
+        *success = true;  // Server didn't provide total size
     }
-    // CANNOT use sscanf here!!
-    int matched = _snscanf(str, len, "bytes %lld-%lld/%lld", start_pos, end_pos, all_size);
-    if (matched != 3) {
-        *success = false;
-        return;
-    }
-    *success = true;
+
+    free(tmp);
 }
 
+/** Write buffered data to file */
 static void write_to_file() {
-    if (file == null || buffer == null) {
-        printf("File pointer or buffer is null, cannot write to file.\n");
+    if (!download_file_p || !download_buffer) {
+        printf("\nInvalid file or buffer state\n");
         exit(2);
-        return;
     }
-    if (buffer_len > 0) {
-        fwrite(buffer, 1, buffer_len, file);
-        buffer_len = 0;
+
+    if (download_buffer_len > 0) {
+        size_t written = fwrite(download_buffer, 1, download_buffer_len, download_file_p);
+        if (written != (size_t)download_buffer_len) {
+            printf("\nWrite failed: expected %lld, wrote %zu\n",
+                download_buffer_len, written);
+            exit(3);
+        }
+        fflush(download_file_p);
+        download_buffer_len = 0;
     }
 }
 
+/** Clean up resources */
+static void cleanup_resources() {
+    if (download_buffer) {
+        free(download_buffer);
+        download_buffer = NULL;
+    }
+
+    if (download_file_p) {
+        fclose(download_file_p);
+        download_file_p = NULL;
+    }
+}
+
+/** Print usage instructions */
 static void print_http_download_usage() {
-    printf("Options:\n");
-    printf("  -u <url>       Required. Set the URL to download from. includes scheme, host, port, path, params and etc.\n");
-    printf("  -p <path>      Required. Set the path to save the downloaded file, includes filename, absolute path and suffix.\n");
-    printf("  -t <timeout>   Set the timeout in milliseconds. it must be integer and larger than 0 (default: 10 seconds)\n");
-    printf("  -s <size>      Set the maximum size of each download piece in bytes. it must be integer and larger than 0 (default: 1MB)\n");
-    printf("  -?\n");
-    printf("  -h\n");
-    printf("  -help          Show this help message\n");
+    printf("HTTP Download Tool\n");
+    printf("Usage:\n");
+    printf("  -u <url>       Download URL (required)\n");
+    printf("  -p <path>      Output file path (required)\n");
+    printf("  -t <timeout>   Connection timeout in ms (default: 10000)\n");
+    printf("  -s <size>      Chunk size in bytes (default: 1048576)\n");
+    printf("  -h             Show this help\n");
 }
 
-
-#endif // !PROTO_HTTP_DOWNLOAD_H
+#endif // PROTO_HTTP_DOWNLOAD_H

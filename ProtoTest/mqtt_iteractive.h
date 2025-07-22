@@ -20,6 +20,9 @@ extern "C" {
 	 */
 	void send_pub_message(const char* msg);
 
+
+    void send_pub_message_mg_str(const struct mg_str* msg);
+
 	/**
 	 * set current device info of available disk and available voltage.
 	 *
@@ -126,13 +129,17 @@ extern "C" {
     }
 
     void send_pub_message(const char* msg) {
+        struct mg_str msg_str = mg_str(msg);
+        send_pub_message_mg_str(&msg_str);
+    }
+
+    inline void send_pub_message_mg_str(const struct mg_str* msg) {
         struct mg_str pubt = mg_str(s_pub_topic);
 
-        struct mg_str mg_str_p = mg_str(msg);
         struct mg_mqtt_opts pub_opts;
         memset(&pub_opts, 0, sizeof(pub_opts));
         pub_opts.topic = pubt;
-        pub_opts.message = mg_str_p;
+        pub_opts.message = *msg;
         pub_opts.qos = s_qos, pub_opts.retain = false;
         pub_opts.user = mg_str(user);
         pub_opts.pass = mg_str(password);
@@ -140,7 +147,7 @@ extern "C" {
         mg_mqtt_pub(s_conn, &pub_opts);
         char time[10] = { 0 };
         format_current_time(time);
-        MG_INFO(("%s \t%lu PUBLISHED %.*s -> %.*s", time, s_conn->id, (int)mg_str_p.len, mg_str_p.buf, (int)pubt.len, pubt.buf));
+        MG_INFO(("%s \t%lu PUBLISHED %.*s -> %.*s", time, s_conn->id, (int)msg->len, msg->buf, (int)pubt.len, pubt.buf));
     }
 
 

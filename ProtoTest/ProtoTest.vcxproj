@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="http_download.h" />
+    <ClInclude Include="http_file_upload.h" />
     <ClInclude Include="json_util.h" />
     <ClInclude Include="mongoose.h" />
     <ClInclude Include="mqtt_iteractive.h" />
