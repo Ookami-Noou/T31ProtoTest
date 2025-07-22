@@ -50,10 +50,9 @@ long string_to_long(const char* str, int len, bool* success) {
  */
 void format_current_time(char* buffer) {
     time_t rawtime;
-    struct tm* timeinfo;
 
     time(&rawtime);
-    timeinfo = localtime(&rawtime);
+    struct tm* timeinfo = localtime(&rawtime);
 
     sprintf(buffer, "%02d:%02d:%02d",
         timeinfo->tm_hour,

@@ -16,7 +16,11 @@ int test_mqtt_interactive() {
 		"-bt_ver", "V9.1.1.51",
 		"-total_disk", "16777216", // 16 * 1024 * 1024
 		"-webrtc", "HCSX-00-NB23-7FHK-00000013",
+		"-avail_disk", "8388608", // 8 * 1024 * 1024
+		"-voltage", "33",
 		"-qos", "1",
+		"-upload", "180000", // 3 minutes
+		"-ca", null
 	};
 
 	return mqtt_interactive_main(sizeof(argv) / sizeof(argv[0]), argv);
@@ -34,5 +38,5 @@ int test_http_download() {
 }
 
 int main(int argc, char* argv[]) {
-	return test_http_download();
+	return test_mqtt_interactive();
 }

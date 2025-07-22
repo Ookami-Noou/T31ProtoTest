@@ -41,7 +41,7 @@ bool is_json_string(const char* str, int len) {
     }
 
     // used for checking brackets
-    char stack[1000];
+    char stack[100];
     int top = -1;
     bool in_string = 0;
     int escaped = 0;
@@ -202,7 +202,7 @@ static char* parse_other_value(const char* input, const char** end) {
     size_t len = p - start;
     char* value = (char*) malloc(len + 1);
     if (!value) return NULL;
-    strncpy(value, start, len);
+    strncpy_s(value, len + 1, start, len);
     value[len] = '\0';
     *end = p;
     return value;
