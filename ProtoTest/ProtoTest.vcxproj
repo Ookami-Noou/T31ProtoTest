@@ -23,6 +23,7 @@
     <ClInclude Include="json_util.h" />
     <ClInclude Include="mongoose.h" />
     <ClInclude Include="mqtt_iteractive.h" />
+    <ClInclude Include="mqtt_ota.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
   <ItemGroup>

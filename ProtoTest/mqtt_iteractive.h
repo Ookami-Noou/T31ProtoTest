@@ -34,18 +34,6 @@ static int s_qos = 1;                                                   // MQTT 
 
 static struct mg_connection* s_conn;              // Client connection
 
-void format_current_time(char* buffer) {
-    time_t rawtime;
-    struct tm* timeinfo;
-
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-
-    sprintf(buffer, "%02d:%02d:%02d",
-        timeinfo->tm_hour,
-        timeinfo->tm_min,
-        timeinfo->tm_sec);
-}
 
 void send_pub_message(struct mg_str* msg) {
     struct mg_str pubt = mg_str(s_pub_topic);

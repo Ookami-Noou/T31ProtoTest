@@ -43,6 +43,23 @@ long string_to_long(const char* str, int len, bool* success) {
     return value * sign;
 }
 
+/**
+ * get timestamp of current.
+ * 
+ * @param [in] buffer - output for string formatted by `%02d:%02d:%02d`
+ */
+void format_current_time(char* buffer) {
+    time_t rawtime;
+    struct tm* timeinfo;
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    sprintf(buffer, "%02d:%02d:%02d",
+        timeinfo->tm_hour,
+        timeinfo->tm_min,
+        timeinfo->tm_sec);
+}
 
 
 #endif // !PROTO_UTIL_H
