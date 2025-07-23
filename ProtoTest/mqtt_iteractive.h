@@ -2,8 +2,8 @@
 #define PROTO_MQTT_INTERACTIVE_H
 
 #include "mqtt_iteractive.h"
-#include "json_util.h"
 #include "util.h"
+#include "json.h"
 
 #include "mongoose.h"
 #include <time.h>
@@ -12,6 +12,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+    typedef struct {
+        const char* type;         // Type of command
+        const char* client_id;    // Client ID
+        const char* message_id;   // Message ID for this communication, should be used in reply messages
+        const char* msg;          // Extra message of command, can be null when sent from server
+        struct {
+            int32_t funcId;       // Function ID of the command
+            json_value_t* data;   // a json data for this `funcId`
+        } properties;             // extra data of command
+    } command_t;
 
 	/**
 	 * send a message to publish topic.
@@ -106,6 +117,136 @@ extern "C" {
     static int voltage = 0;                  // Voltage level as a string, used for report_property message
 
     static struct mg_connection* s_conn;              // Client connection
+
+#define IS_KEY(json_obj, key) (strncmp(json_obj->name->string, key, json_obj->name->string_size) == 0)
+#define IS_VALUE_TYPE(json_obj, target_type) (json_obj->value->type == target_type)
+
+    static void free_command(command_t* cmd);
+    static command_t* parse_command(const char* json_data);
+
+    static command_t* parse_command(const char* json_data) {
+		json_value_t* json_obj = json_parse(json_data, strlen(json_data));
+		if (json_obj == null) {
+			MG_ERROR(("Failed to parse JSON data: %s", json_data));
+			return null;
+		}
+		command_t* cmd = (command_t*)malloc(sizeof(command_t));
+		if (cmd == null) {
+			MG_ERROR(("Failed to allocate memory for command_t"));
+            goto on_fail;
+		}
+		memset(cmd, 0, sizeof(command_t));
+        if (json_obj->type != json_type_object) {
+			MG_ERROR(("JSON data is not an object: %s", json_data));
+        }
+        else {
+			json_object_t* obj = (json_object_t*)json_obj->payload;
+			json_object_element_t* elem = obj->start;
+            while (elem) {
+				if (IS_KEY(elem, "type") && IS_VALUE_TYPE(elem, json_type_string)) {
+					json_string_t* string_str = (json_string_t*)elem->value->payload;
+					char* str = (const char*)malloc(string_str->string_size + 1);
+					if (str) {
+						strncpy(str, string_str->string, string_str->string_size);
+                        str[string_str->string_size] = '\0';
+						cmd->type = str;
+                    }
+                    else {
+						MG_ERROR(("Failed to allocate memory for command type"));
+                        goto on_fail;
+                    }
+				}
+                else if (IS_KEY(elem, "clientId") && IS_VALUE_TYPE(elem, json_type_string)) {
+                    json_string_t* string_str = (json_string_t*)elem->value->payload;
+                    char* str = (const char*)malloc(string_str->string_size + 1);
+                    if (str) {
+                        strncpy(str, string_str->string, string_str->string_size);
+                        str[string_str->string_size] = '\0';
+                        cmd->client_id = str;
+                    }
+                    else {
+                        MG_ERROR(("Failed to allocate memory for command type"));
+                        goto on_fail;
+                    }
+                }
+				else if (IS_KEY(elem, "messageId") && IS_VALUE_TYPE(elem, json_type_string)) {
+					json_string_t* string_str = (json_string_t*)elem->value->payload;
+					char* str = (const char*)malloc(string_str->string_size + 1);
+					if (str) {
+						strncpy(str, string_str->string, string_str->string_size);
+						str[string_str->string_size] = '\0';
+						cmd->message_id = str;
+					}
+					else {
+						MG_ERROR(("Failed to allocate memory for command message_id"));
+                        goto on_fail;
+					}
+				}
+                else if (IS_KEY(elem, "msg")) {
+                    if (IS_VALUE_TYPE(elem, json_type_string)) {
+						json_string_t* string_str = (json_string_t*)elem->value->payload;
+						char* str = (const char*)malloc(string_str->string_size + 1);
+						if (str) {
+							strncpy(str, string_str->string, string_str->string_size);
+							str[string_str->string_size] = '\0';
+							cmd->msg = str;
+						}
+						else {
+							MG_ERROR(("Failed to allocate memory for command msg"));
+							goto on_fail;
+						}
+					}
+                    else if (IS_VALUE_TYPE(elem, json_type_null)) {
+                        cmd->msg = null;
+                    }
+                }
+                else if (IS_KEY(elem, "cmd") && IS_VALUE_TYPE(elem, json_type_object)) {
+                    json_object_t* object = (json_object_t*)elem->value->payload;
+					json_object_element_t* cmd_elem = object->start;
+                    while (cmd_elem) {
+                        if (IS_KEY(cmd_elem, "funcId") && IS_VALUE_TYPE(cmd_elem, json_type_number)) {
+                            json_number_t* cmd_func_id = json_value_as_number(cmd_elem->value);
+                            if (cmd_func_id == null) {
+								MG_ERROR(("Failed to get funcId from command"));
+								goto on_fail;
+                            }
+                            bool success = false;
+							cmd->properties.funcId = string_to_long(cmd_func_id->number, cmd_func_id->number_size, &success);
+                            if (!success) {
+								MG_ERROR(("Failed to parse funcId from command"));
+                                goto on_fail;
+                            }
+						}
+						else if (IS_KEY(cmd_elem, "data") && IS_VALUE_TYPE(cmd_elem, json_type_object)) {
+                            cmd->properties.data = json_extract_value(cmd_elem->value);
+						}
+                        cmd_elem = cmd_elem->next;
+                    }
+                }
+
+                elem = elem->next;
+            }
+        }
+		
+		free(json_obj);
+		return cmd;
+
+    on_fail:
+        free(json_obj);
+        free_command(cmd);
+        return null;
+    }
+
+    static void free_command(command_t* cmd) {
+		if (cmd == null) return;
+		if (cmd->type) free((void*)cmd->type);
+		if (cmd->client_id) free((void*)cmd->client_id);
+		if (cmd->message_id) free((void*)cmd->message_id);
+		if (cmd->msg) free((void*)cmd->msg);
+		if (cmd->properties.data) free(cmd->properties.data);
+		free(cmd);
+    }
+
 
     void set_device_info(long disk, int vol) {
         if (disk < 0) {
@@ -221,10 +362,6 @@ extern "C" {
     void process_received_data(const struct mg_str* const data) {
         printf("%s:%d TODO use json lib to process data received from server", __FILE__, __LINE__);
         if (data == null || data->len == 0 || data->buf == null) return;
-        if (!is_json_string(data->buf, data->len)) {
-            MG_ERROR(("Received data is not a valid JSON string: %.*s", (int)data->len, data->buf));
-            return;
-        }
         command_t* cmd = parse_command(data->buf);
         if (cmd == null) {
             MG_ERROR(("Failed to parse command from received data: %.*s", (int)data->len, data->buf));
@@ -250,9 +387,12 @@ extern "C" {
             "\n\tclient_id: %s,"
             "\n\tmessage_id: %s,"
             "\n\tmsg: %s,"
-            "\n\tcmd: %s,"
+            "\n\tcmd: {,"
+            "\n\t\tfuncId: %d,"
+            "\n\t\tdata: %s"
+            "\n\t}"
             "\n}\n",
-            cmd->type, cmd->client_id, cmd->message_id, cmd->msg, cmd->cmd));
+            cmd->type, cmd->client_id, cmd->message_id, cmd->msg, cmd->properties.funcId, cmd->properties.data));
 
         struct mg_str replay = get_result_replay_msg(replay_type, cmd->message_id, "{\"funcId\":16386,\"data\":{\"default\":\"\"}}");
 

@@ -18,9 +18,6 @@
     <ClInclude Include="mongoose.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="json_util.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="http_download.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -34,6 +31,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="http_file_upload.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="json.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

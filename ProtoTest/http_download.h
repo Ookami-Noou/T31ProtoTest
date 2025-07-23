@@ -112,8 +112,7 @@ int http_download_main(int argc, char* argv[]) {
         // Event polling loop
         while (state == STETE_RUNNING) {
             mg_mgr_poll(&mgr, 1000);
-            printf("Progress: %.1f%%\r",
-                download_all_size > 0 ? (double)download_offset / download_all_size * 100 : 0.0);
+            printf("Progress: %.1f%%\r", download_all_size > 0 ? (double)download_offset / download_all_size * 100 : 0.0);
             fflush(stdout);
         }
 

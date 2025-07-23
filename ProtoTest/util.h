@@ -3,19 +3,19 @@
 
 #include <stdio.h>
 
-#ifndef NULL
-#define NULL ((void*) 0)
-#endif
-
 #ifndef null
+#ifdef NULL
 #define null NULL
+#else
+#define null ((void*) 0)
+#endif
 #endif
 
 // Convert a string to a long integer, handling signs and invalid characters
 // if ivalid characters are found, it prints an error message and returns 0
-long string_to_long(const char* str, int len, bool* success) {
-    long value = 0;
-    long sign = 1; // Default sign is positive
+int64_t string_to_long(const char* str, int len, bool* success) {
+    int64_t value = 0;
+    int64_t sign = 1; // Default sign is positive
     int i = 0;
     if (str == NULL || len <= 0) {
         *success = false;
