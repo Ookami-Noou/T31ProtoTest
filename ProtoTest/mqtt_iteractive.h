@@ -107,7 +107,7 @@ extern "C" {
 
     static const char* ca_path = null;          // CA certificate path, if needed
 
-    static const char* s_url = "mqtt://36.137.92.217:1007";                 // server url for MQTT-connection
+    static const char* s_mqtt_url = "mqtt://36.137.92.217:1007";                 // server url for MQTT-connection
     static const char* s_sub_topic = "earphone_f1/%s~%s/cmd";               // subscribe topic, ## init later in main function
     static const char* s_pub_topic = "earphone_f1/%s~%s/status";            // publish topic,   ## init later in main function
     static int s_qos = 1;                                                   // MQTT QoS
@@ -412,10 +412,10 @@ extern "C" {
             //c->is_hexdumping = 1;
         }
         else if (ev == MG_EV_CONNECT) {
-            MG_INFO(("%s \t%lu Connect to %s", time, c->id, s_url));
+            MG_INFO(("%s \t%lu Connect to %s", time, c->id, s_mqtt_url));
             if (ca_path != null && c->is_tls) {
                 struct mg_tls_opts opts = { .ca = mg_unpacked(ca_path),
-                                           .name = mg_url_host(s_url) };
+                                           .name = mg_url_host(s_mqtt_url) };
                 mg_tls_init(c, &opts);
             }
         }
@@ -426,7 +426,7 @@ extern "C" {
         else if (ev == MG_EV_MQTT_OPEN) {
             // MQTT connect is successful
             struct mg_str subt = mg_str(s_sub_topic);
-            MG_INFO(("%s \t%lu CONNECTED to %s", time, c->id, s_url));
+            MG_INFO(("%s \t%lu CONNECTED to %s", time, c->id, s_mqtt_url));
             struct mg_mqtt_opts sub_opts;
             memset(&sub_opts, 0, sizeof(sub_opts));
             sub_opts.topic = subt;
@@ -463,7 +463,7 @@ extern "C" {
         opts.qos = s_qos;
         opts.topic = mg_str(s_pub_topic);
         opts.client_id = mg_str(client_id);
-        if (s_conn == null) s_conn = mg_mqtt_connect(mgr, s_url, &opts, mqtt_interactive_callback_fn, null);
+        if (s_conn == null) s_conn = mg_mqtt_connect(mgr, s_mqtt_url, &opts, mqtt_interactive_callback_fn, null);
     }
 
     /* upload device info timer */
