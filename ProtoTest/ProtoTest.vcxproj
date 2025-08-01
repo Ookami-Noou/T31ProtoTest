@@ -24,12 +24,16 @@
     <ClInclude Include="json.h" />
     <ClInclude Include="mongoose.h" />
     <ClInclude Include="mqtt_iteractive.h" />
-    <ClInclude Include="mqtt_ota.h" />
+    <ClInclude Include="mqtt_ota_class.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="http_download.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="main.cpp" />
     <ClCompile Include="mongoose.c" />
+    <ClCompile Include="mqtt_ota_class.cpp" />
+    <ClCompile Include="util.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
